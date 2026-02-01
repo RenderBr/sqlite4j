@@ -44,9 +44,8 @@
             </resource>
             <resource>
                 <directory>src/main/resources</directory>
-                <filtering>true</filtering>
                 <includes>
-                    <include>sqlite-jdbc.properties</include>
+                    <include>**/*.wasm</include>
                 </includes>
             </resource>
             <resource>
@@ -152,20 +151,7 @@
 
             <plugin>
                 <groupId>com.dylibso.chicory</groupId>
-                <artifactId>chicory-compiler-maven-plugin</artifactId>
-                <version>${chicory.version}</version>
-                <executions>
-                <execution>
-                    <id>compile-sqlite</id>
-                    <goals>
-                        <goal>compile</goal>
-                    </goals>
-                    <configuration>
-                        <name>io.roastedroot.sqlite4j.SQLiteModule</name>
-                        <wasmFile>${project.basedir}/wasm-lib/libsqlite3.wasm</wasmFile>
-                    </configuration>
-                </execution>
-                </executions>
+                <artifactId>compiler</artifactId>
             </plugin>
         </plugins>
 
@@ -250,6 +236,37 @@
                     </plugin>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <version>3.6.0</version>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>shade</goal>
+                                </goals>
+                                <configuration>
+                                    <relocations>
+                                        <relocation>
+                                            <pattern>com.dylibso.chicory</pattern>
+                                            <shadedPattern>io.roastedroot.sqlite4j.shaded.chicory</shadedPattern>
+                                        </relocation>
+                                    </relocations>
+                                    <filters>
+                                        <filter>
+                                            <artifact>*:*</artifact>
+                                            <excludes>
+                                                <exclude>META-INF/*.SF</exclude>
+                                                <exclude>META-INF/*.DSA</exclude>
+                                                <exclude>META-INF/*.RSA</exclude>
+                                            </excludes>
+                                        </filter>
+                                    </filters>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
                         <version>3.4.0</version>
                         <executions>
@@ -303,6 +320,10 @@
         <dependency>
             <groupId>com.dylibso.chicory</groupId>
             <artifactId>wasi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.dylibso.chicory</groupId>
+            <artifactId>compiler</artifactId>
         </dependency>
         <dependency>
             <groupId>com.dylibso.chicory</groupId>

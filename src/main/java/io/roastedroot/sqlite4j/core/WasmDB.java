@@ -3,12 +3,11 @@ package io.roastedroot.sqlite4j.core;
 import static io.roastedroot.sqlite4j.core.wasm.WasmDBExports.SQLITE_SERIALIZE_NOCOPY;
 import static io.roastedroot.sqlite4j.core.wasm.WasmDBExports.SQLITE_UTF8;
 
-import com.dylibso.chicory.runtime.ByteArrayMemory;
-import com.dylibso.chicory.runtime.ImportValues;
-import com.dylibso.chicory.runtime.Instance;
-import com.dylibso.chicory.runtime.Memory;
+import com.dylibso.chicory.compiler.MachineFactoryCompiler;
+import com.dylibso.chicory.runtime.*;
 import com.dylibso.chicory.wasi.WasiOptions;
 import com.dylibso.chicory.wasi.WasiPreview1;
+import com.dylibso.chicory.wasm.Parser;
 import com.dylibso.chicory.wasm.WasmModule;
 import com.dylibso.chicory.wasm.types.MemoryLimits;
 import io.roastedroot.sqlite4j.BusyHandler;
@@ -18,7 +17,6 @@ import io.roastedroot.sqlite4j.ProgressHandler;
 import io.roastedroot.sqlite4j.SQLiteConfig;
 import io.roastedroot.sqlite4j.SQLiteErrorCode;
 import io.roastedroot.sqlite4j.SQLiteException;
-import io.roastedroot.sqlite4j.SQLiteModule;
 import io.roastedroot.sqlite4j.SQLiteUpdateListener;
 import io.roastedroot.sqlite4j.Version;
 import io.roastedroot.sqlite4j.core.wasm.BusyHandlerStore;
@@ -28,9 +26,12 @@ import io.roastedroot.sqlite4j.core.wasm.ProgressHandlerStore;
 import io.roastedroot.sqlite4j.core.wasm.UDFStore;
 import io.roastedroot.sqlite4j.core.wasm.WasmDBExports;
 import io.roastedroot.sqlite4j.core.wasm.WasmDBImports;
+
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileSystem;
@@ -38,18 +39,20 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.sql.SQLException;
+import java.util.Objects;
 
 public class WasmDB extends DB implements WasmDBImports {
     public static final int PTR_SIZE = 4;
-    private static final WasmModule MODULE = SQLiteModule.load();
-
+    public static String version = Version.libVersion();
     private final Instance instance;
     private final WasiPreview1 wasiPreview1;
     private final WasmDBExports lib;
     private final FileSystem fs;
     private final boolean isMemory;
 
-    /** SQLite connection handle. */
+    /**
+     * SQLite connection handle.
+     */
     private int dbPtrPtr = 0;
 
     private int dbPtr = 0;
@@ -71,9 +74,21 @@ public class WasmDB extends DB implements WasmDBImports {
                         .build();
 
         wasiPreview1 = WasiPreview1.builder().withOptions(wasiOpts).build();
+        WasmModule module;
+
+        try (var stream = getClass().getResourceAsStream("/libsqlite3.wasm")) {
+            if (stream == null) {
+                throw new RuntimeException("libsqlite3.wasm not found");
+            }
+            // Check if your library supports parsing a stream directly
+            module = Parser.parse(stream.readAllBytes());
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to load libsqlite3.wasm", e);
+        }
+
         instance =
-                Instance.builder(MODULE)
-                        .withMachineFactory(SQLiteModule::create)
+                Instance.builder(module)
+                        .withMachineFactory(MachineFactoryCompiler::compile)
                         .withMemoryFactory(ByteArrayMemory::new)
                         .withImportValues(
                                 ImportValues.builder()
@@ -87,6 +102,11 @@ public class WasmDB extends DB implements WasmDBImports {
                         // TODO: find as tradeoff between QueryTest.github720 and JDBCTest.hammer
                         .withMemoryLimits(new MemoryLimits(500, Memory.RUNTIME_MAX_PAGES))
                         .build();
+
+        int ptr = new WasmDBExports(instance).version();
+
+        version = instance.memory().readCString(ptr);
+
         lib = new WasmDBExports(instance);
     }
 
@@ -1154,23 +1174,6 @@ public class WasmDB extends DB implements WasmDBImports {
     // Should we cache something?
     // another alternative is to compute it at compile time ...
     public static String version() {
-        WasiOptions wasiOpts = WasiOptions.builder().build();
-
-        try (WasiPreview1 wasiPreview1 = WasiPreview1.builder().withOptions(wasiOpts).build()) {
-            Instance tmp =
-                    Instance.builder(MODULE)
-                            .withMachineFactory(SQLiteModule::create)
-                            .withImportValues(
-                                    ImportValues.builder()
-                                            .addFunction(wasiPreview1.toHostFunctions())
-                                            .addFunction(new DummyWasmDBImports().toHostFunctions())
-                                            .build())
-                            .withStart(false)
-                            .build();
-            int ptr = new WasmDBExports(tmp).version();
-
-            String version = tmp.memory().readCString(ptr);
-            return version;
-        }
+        return WasmDB.version;
     }
 }
